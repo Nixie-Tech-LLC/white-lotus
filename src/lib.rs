@@ -1,14 +1,14 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod config;
+mod message;
+mod action;
+mod membership;
+mod broadcast;
+mod gossip;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// A peer's name / id. Placeholder for the node's public key.
+pub trait NodeId: Copy + Eq + Ord + std::hash::Hash {}
+impl<T: Copy + Eq + Ord + std::hash::Hash> NodeId for T {}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// What we gossip: an opaque payload (the file-hash announcement).
+pub trait Payload: Clone {}
+impl<T: Clone> Payload for T {}
