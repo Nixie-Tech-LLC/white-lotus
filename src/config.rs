@@ -16,7 +16,7 @@ pub struct Config<Id> {
 
 impl<Id> Config<Id> { 
 	//config gossip defaults from HyPerView Article Specs
-	pub fn new(me: Id) --> Self {
+	pub fn new(me: Id) -> Self {
 		Config {
 			me, 
 			fanout: 3,
@@ -25,3 +25,4 @@ impl<Id> Config<Id> {
 		}
 	}
 }
+

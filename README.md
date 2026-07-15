@@ -37,5 +37,22 @@ this means you always retain four plus one active nodes per node - these are you
 
 as for passive view: log(n) - in the paper they suggest 30 passive nodes - these serve as a backup resovior if your active nodes arent responding - any active node that dies is immeidnelty replaces with a pasive node and that passive node slot is in turn replaced/remade - in the word of the lovly authors Rule: it "must be larger than log(n)" to keep the network connected through many simultaneous failures. For n = 10,000, log₂(n) ≈ 13, so 30 is a comfortable safety margin. They note the overhead is "minimal, as no connections are kept open"
 
+fanout - fanout of four vs the classic gossip protocol of ln(n) + c - HyPar View sticks with bare minimum of 4 node fanout becuase it gets the job done - the trade offs are 
+
+going back to our clock, timing and sequencing questions from before: 
+HyParView's core "how far / how long" parameters are not measured in seconds — they're hop counts:
+- Active Random Walk Length (ARWL) = 6 — max hops a join request travels.
+- Passive Random Walk Length (PRWL) = 3 — the hop at which a node gets recorded in a passive view.
+- The shuffle runs on a periodic cycle, and TTLs are decremented per hop, not per second.
+
+for citation see: All parameters together (§4.2, "Experimental Parameters"): network = 10,000 nodes · active view = 5 · passive view = 30 · ARWL = 6 · PRWL = 3 · shuffle exchanges 3 from active + 4 from passive · fanout = 4
+
+message.rs
+
+message.rs is the wire format: the exhaustive list of things one peer can send another. HyParView needs two families of messages — membership control (build & repair the overlay) and broadcast (actually disseminate your announcements).
+each broadcase bears a unique id sot that peers can identify a message theyve already seen and avoid duplicating messages when dissiminating them to other peers.
+
+the enum message is everything one node can say to another node - the node id and payload are what they gossip between eachother - this resuses the vocabulary we defined in the lib.rs file at the beguinning
+  
 
  
