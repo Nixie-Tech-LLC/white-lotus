@@ -21,5 +21,5 @@ pub enum Message<Id: NodeId, P:Payload> {
 	//replay shuffle to peers
 	ShuffleReplay { peers: Vec<Id> }, 
 	// this is the disseminiation - file hash announcment plus id and hop counter bounded by Confiug max rounds
-	Broadcast { id: MessageId, sender: Id, hop: u32, payload: P },
+	Broadcast { origin: Id, seq: MessageId, sender: Id, hop: u32, payload: P },
 }

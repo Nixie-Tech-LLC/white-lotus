@@ -7,7 +7,8 @@ use white_lotus::Message;
 fn broadcast_message_round_trips_through_json() {
 	// Build a message, like one a node would send.
 	let original: Message<u32, String> = Message::Broadcast {
-		id: 7,
+		origin: 1,
+		seq: 7,
 		sender: 1,
 		hop: 2,
 		payload: String::from("filehash-abc123"),

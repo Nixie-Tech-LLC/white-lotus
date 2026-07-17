@@ -10,10 +10,10 @@ use crate::broadcast;
 pub struct Node<Id: NodeId> {
 	config: Config<Id>,
 	membership: Membership<Id>,
-	// message ids we've already seen, so we never deliver or forward twice
-	seen: HashSet<MessageId>,
-	// counter for minting fresh broadcast ids
-	next_id: MessageId,
+	// (origin, seq) ids we've already seen, so we never deliver or forward twice
+	seen: HashSet<(Id, MessageId)>,
+	// per-node counter for minting fresh broadcast sequence numbers
+	next_seq: MessageId,
 }
 
 impl<Id: NodeId> Node<Id> {
@@ -30,26 +30,26 @@ impl<Id: NodeId> Node<Id> {
 			config,
 			membership,
 			seen: HashSet::new(),
-			next_id: 0,
+			next_seq: 0,
 		}
 	}
 
 	// Start a brand-new broadcast of `payload` from this node.
 	pub fn broadcast<P: Payload>(&mut self, payload: P) -> Vec<Action<Id, P>> {
-		let id = self.next_id;
-		self.next_id += 1;
-		self.seen.insert(id);
+		let seq = self.next_seq;
+		self.next_seq += 1;
+		self.seen.insert((self.config.me, seq));
 		let peers: Vec<Id> = self.membership.active_peers().copied().collect();
-		broadcast::forward(self.config.me, &peers, None, id, 0, &payload)
+		broadcast::forward(self.config.me, &peers, None, self.config.me, seq, 0, &payload)
 	}
 
 	// React to any incoming message.
 	pub fn handle<P: Payload>(&mut self, msg: Message<Id, P>) -> Vec<Action<Id, P>> {
 		match msg {
-			Message::Broadcast { id, sender, hop, payload } => {
+			Message::Broadcast { origin, seq, sender, hop, payload } => {
 				let mut actions = Vec::new();
-				// Dedup: ignore anything we've already seen.
-				if !self.seen.insert(id) {
+				// Dedup on the globally-unique (origin, seq) id.
+				if !self.seen.insert((origin, seq)) {
 					return actions;
 				}
 				// Deliver it locally.
@@ -61,7 +61,7 @@ impl<Id: NodeId> Node<Id> {
 				// Otherwise keep it moving - forward to the rest of the active view.
 				let peers: Vec<Id> = self.membership.active_peers().copied().collect();
 				actions.extend(broadcast::forward(
-					self.config.me, &peers, Some(sender), id, hop, &payload,
+					self.config.me, &peers, Some(sender), origin, seq, hop, &payload,
 				));
 				actions
 			}

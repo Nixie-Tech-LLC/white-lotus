@@ -23,7 +23,7 @@ fn main() {
     node2.handle::<u64>(Message::Join { new_node: 4 }); // node 2 knows peer 4
 
     println!("\nPeer 2 receives the announcement and reacts:");
-    let incoming = Message::Broadcast { id: 0, sender: 1, hop: 0, payload: 42u64 };
+    let incoming = Message::Broadcast { origin: 1, seq: 0, sender: 1, hop: 0, payload: 42u64 };
     for action in node2.handle(incoming) {
         match action {
             Action::Deliver { payload } => println!("  -> node 2 delivers payload {payload} to its app"),
@@ -34,7 +34,7 @@ fn main() {
 
     // --- Dedup: the same announcement a second time does nothing ---
     println!("\nPeer 2 sees the SAME announcement again (id 0):");
-    let duplicate = Message::Broadcast { id: 0, sender: 1, hop: 0, payload: 42u64 };
+    let duplicate = Message::Broadcast { origin: 1, seq: 0, sender: 1, hop: 0, payload: 42u64 };
     let actions = node2.handle(duplicate);
     if actions.is_empty() {
         println!("  -> ignored (already seen) - dedup works");
