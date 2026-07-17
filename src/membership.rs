@@ -15,11 +15,15 @@ pub struct Membership<Id: NodeId> {
 	active_capasity: usize,
 	//max pastive view
 	passive_capasity: usize,
+	//ARWL - how far a ForwardJoin walks before a node adopts it
+	active_walk_length: u32,
+	//PRWL - hop at which a joining node is stashed in the passive view
+	passive_walk_length: u32,
 }
 
 impl<Id: NodeId> Membership<Id> {
 	//start with empty views (sized per specs in essay)
-	pub fn new(me: Id, fanout: usize, passive_capasity: usize) -> Self
+	pub fn new(me: Id, fanout: usize, passive_capasity: usize, active_walk_length: u32, passive_walk_length: u32) -> Self
 {
  Membership {
             me,
@@ -27,6 +31,8 @@ impl<Id: NodeId> Membership<Id> {
             passive: HashSet::new(),
             active_capasity: fanout + 1,
             passive_capasity,
+            active_walk_length,
+            passive_walk_length,
         }
     }
 //is active view full of the appropriate number of nodes?
@@ -87,16 +93,44 @@ impl<Id: NodeId> Membership<Id> {
         let mut actions = Vec::new();
         match msg {
             Message::Join { new_node } => {
-                // Take the newcomer into our active view...
+                // Accept the newcomer into our active view.
                 let evicted = self.add_to_active(new_node);
                 actions.push(Action::Connect { peer: new_node });
-                // ...and if that bumped someone, disconnect them cleanly.
                 if let Some(old) = evicted {
-                    actions.push(Action::Send {
-                        to: old,
-                        msg: Message::Disconnect { sender: self.me },
-                    });
+                    actions.push(Action::Send { to: old, msg: Message::Disconnect { sender: self.me } });
                     actions.push(Action::Disconnect { peer: old });
+                }
+                // Tell our other active peers, kicking off the random walk.
+                for &peer in self.active.iter() {
+                    if peer != new_node {
+                        actions.push(Action::Send {
+                            to: peer,
+                            msg: Message::ForwardJoin { new_node, sender: self.me, ttl: self.active_walk_length },
+                        });
+                    }
+                }
+            }
+            Message::ForwardJoin { new_node, sender, ttl } => {
+                // End of the walk, or we're nearly isolated: adopt into active view.
+                if ttl == 0 || self.active.len() <= 1 {
+                    let evicted = self.add_to_active(new_node);
+                    actions.push(Action::Connect { peer: new_node });
+                    if let Some(old) = evicted {
+                        actions.push(Action::Send { to: old, msg: Message::Disconnect { sender: self.me } });
+                        actions.push(Action::Disconnect { peer: old });
+                    }
+                } else {
+                    // At the passive-walk point, stash the node in the backup set.
+                    if ttl == self.passive_walk_length {
+                        self.add_to_passive(new_node);
+                    }
+                    // Keep the walk going: pass it to a neighbor other than the sender.
+                    if let Some(&next) = self.active.iter().find(|&&p| p != sender) {
+                        actions.push(Action::Send {
+                            to: next,
+                            msg: Message::ForwardJoin { new_node, sender: self.me, ttl: ttl - 1 },
+                        });
+                    }
                 }
             }
             Message::Disconnect { sender } => {
@@ -105,12 +139,63 @@ impl<Id: NodeId> Membership<Id> {
                 self.add_to_passive(sender);
                 actions.push(Action::Disconnect { peer: sender });
             }
-            Message::Broadcast { payload, .. } => {
-                // Membership doesn't disseminate; just deliver it for now.
-                actions.push(Action::Deliver { payload });
+            Message::Neighbor { sender, accepted } => {
+                // `accepted` flags a high-priority request that can't be refused
+                // (the sender's active view is nearly empty).
+                let high_priority = accepted;
+                if high_priority || !self.active_is_full() {
+                    let evicted = self.add_to_active(sender);
+                    actions.push(Action::Connect { peer: sender });
+                    actions.push(Action::Send {
+                        to: sender,
+                        msg: Message::NeighborReply { sender: self.me, accepted: true },
+                    });
+                    if let Some(old) = evicted {
+                        actions.push(Action::Send { to: old, msg: Message::Disconnect { sender: self.me } });
+                        actions.push(Action::Disconnect { peer: old });
+                    }
+                } else {
+                    // Full and not urgent: politely decline.
+                    actions.push(Action::Send {
+                        to: sender,
+                        msg: Message::NeighborReply { sender: self.me, accepted: false },
+                    });
+                }
             }
-            // TODO Pass 4: ForwardJoin, Neighbor, NeighborReply, Shuffle, ShuffleReply
-            _ => {}
+            Message::NeighborReply { sender, accepted } => {
+                if accepted {
+                    self.add_to_active(sender);
+                    actions.push(Action::Connect { peer: sender });
+                } else {
+                    // Rejected: keep them as a backup for later.
+                    self.add_to_passive(sender);
+                }
+            }
+            Message::Shuffle { origin, sender, ttl, peers } => {
+                if ttl > 0 && self.active.len() > 1 {
+                    // Keep the shuffle walking to a neighbor other than the sender.
+                    if let Some(&next) = self.active.iter().find(|&&p| p != sender) {
+                        actions.push(Action::Send {
+                            to: next,
+                            msg: Message::Shuffle { origin, sender: self.me, ttl: ttl - 1, peers: peers.clone() },
+                        });
+                    }
+                } else {
+                    // Walk done: absorb their sample, reply with some of ours.
+                    let reply: Vec<Id> = self.active.iter().copied().collect();
+                    for p in &peers {
+                        self.add_to_passive(*p);
+                    }
+                    actions.push(Action::Send { to: origin, msg: Message::ShuffleReplay { peers: reply } });
+                }
+            }
+            Message::ShuffleReplay { peers } => {
+                for p in peers {
+                    self.add_to_passive(p);
+                }
+            }
+            // Broadcast dissemination is handled by the gossip layer, not membership.
+            Message::Broadcast { .. } => {}
         }
         actions
     }

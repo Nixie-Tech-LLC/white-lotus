@@ -19,7 +19,13 @@ pub struct Node<Id: NodeId> {
 impl<Id: NodeId> Node<Id> {
 	// Build a node from its config, setting up an empty membership.
 	pub fn new(config: Config<Id>) -> Self {
-		let membership = Membership::new(config.me, config.fanout, config.passive_capacity);
+		let membership = Membership::new(
+			config.me,
+			config.fanout,
+			config.passive_capacity,
+			config.active_walk_length,
+			config.passive_walk_length,
+		);
 		Node {
 			config,
 			membership,
