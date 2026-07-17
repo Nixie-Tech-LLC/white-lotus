@@ -54,5 +54,7 @@ each broadcase bears a unique id sot that peers can identify a message theyve al
 
 the enum message is everything one node can say to another node - the node id and payload are what they gossip between eachother - this resuses the vocabulary we defined in the lib.rs file at the beguinning
   
+Membership
 
+Membership starts by defining a nodes hyparview membership state: the two and their size limits -  
  
