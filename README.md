@@ -105,3 +105,6 @@ For each new message type, there's a clear observable outcome:
 │ Shuffle { ttl: 0, .. } │  origin — sample absorbed &    │
 │                        │ replied                        │
 └────────────────────────┴────────────────────────────────┘
+
+
+A Message is a Rust value in memory; to send it over TCP it has to become a stream of bytes, and become a Message again on the other end. The standard Rust tool for this is serde (serialize/deserialize), and we'll use JSON as the format at first because it's human-readable

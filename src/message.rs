@@ -1,9 +1,10 @@
 use crate::{NodeId, Payload};
+use serde::{Serialize, Deserialize};
 
 // unique message id for broadcas
 pub type MessageId = u64;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Message<Id: NodeId, P:Payload> {
 	// new node - knock knock let me in to the overlay
 	Join { new_node: Id },
