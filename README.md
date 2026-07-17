@@ -76,3 +76,32 @@ example.rs
 
 white-lotus is validated in three complementary layers, mirroring how the HyParView protocol itself was evaluated. First, an integration test suite (tests/simulation.rs) spins up entire networks of nodes — 5, 30, and 40 at a time — inside a single process, wires them into an overlay, broadcasts a message, and asserts that it reaches every node exactly once with no duplicate deliveries; because the protocol logic is pure (each node returns a list of intended actions rather than performing network I/O), we can simulate networks of arbitrary size deterministically and instantly, exactly as Leitão's thesis simulated 10,000 nodes rather than deploying 10,000 machines. Second, a runnable example (examples/three_nodes.rs) exercises the same public API a real user would call and prints the protocol in action, serving simultaneously as living, compiler-checked documentation and as a continuous check that the public interface stays clean and ergonomic. Third, the code is deployed to real Raspberry Pi hardware to validate the connection and serialization layer under genuine network conditions — latency, failures, and churn that simulation cannot fully reproduce — scaling from a handful of devices up to a 40-node fleet. This separation lets simulation prove correctness at scale while hardware proves real-world plumbing, so each layer tests what it is best suited to catch.
 
+self healing tree 
+  - ForwardJoin — the random walk (ARWL/PRWL) that lets a new node wire itself into the overlay from a single contact
+  - Neighbor/NeighborReply — how a dead active peer gets replaced from the passive view (the actual "heals over the severed limb")
+  - Shuffle — keeping the passive backup fresh so replacements are live peers
+
+
+The key insight for testing Pass 4
+
+Every new handler's behavior is observable in the Actions it returns — you don't need to peek inside the private views. So the setup is: feed the node one message, then check what Actions came back. Deterministic, no new API needed, no fragile emergent dynamics.
+
+For each new message type, there's a clear observable outcome:
+
+┌────────────────────────┬────────────────────────────────┐
+│      feed it this      │    expect this Action back     │
+├────────────────────────┼────────────────────────────────┤
+│ ForwardJoin { ttl: 0,  │ Connect { peer: new_node } —   │
+│ .. }                   │ walk ended, node adopted       │
+├────────────────────────┼────────────────────────────────┤
+│ ForwardJoin { ttl: 5,  │ Send { ForwardJoin { ttl: 4 }  │
+│ .. } (with peers)      │ } — walk continues             │
+├────────────────────────┼────────────────────────────────┤
+│ Neighbor { accepted:   │ Send { NeighborReply {         │
+│ false } (room to       │ accepted: true } } — promotion │
+│ spare)                 │  accepted                      │
+├────────────────────────┼────────────────────────────────┤
+│                        │ Send { ShuffleReplay } back to │
+│ Shuffle { ttl: 0, .. } │  origin — sample absorbed &    │
+│                        │ replied                        │
+└────────────────────────┴────────────────────────────────┘
