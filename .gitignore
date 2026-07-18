@@ -1,1 +1,4 @@
 /target
+
+# editor emergency-save backups (nano writes these on a crash/kill)
+*.save
