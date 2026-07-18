@@ -4,6 +4,7 @@ mod action;
 mod membership;
 mod broadcast;
 mod gossip;
+pub mod transport;
 
 // The public API a user of this library works with. Internal modules stay
 // private; these re-exports are the clean surface (e.g. `use white_lotus::Node;`).
