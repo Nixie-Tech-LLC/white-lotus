@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>white-lotus &middot; overlay visualizer</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #262c36;
+    --fg: #e6edf3; --dim: #7d8590;
+    --eager: #58a6ff; --lazy: #6e7681; --deliver: #3fb950;
+    --prune: #f0883e; --graft: #bc8cff; --drop: #f85149;
+    --unobs: #21262d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff; --panel: #f6f8fa; --line: #d0d7de;
+      --fg: #1f2328; --dim: #656d76;
+      --eager: #0969da; --lazy: #8c959f; --deliver: #1a7f37;
+      --prune: #bc4c00; --graft: #8250df; --drop: #cf222e;
+      --unobs: #eaeef2;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  h1 small { color: var(--dim); font-weight: 400; margin-left: 6px; }
+  #stage { flex: 1; display: flex; min-height: 0; }
+  #canvas-wrap { flex: 1; position: relative; min-width: 0; }
+  svg { width: 100%; height: 100%; display: block; }
+  aside {
+    width: 290px; border-left: 1px solid var(--line); background: var(--panel);
+    padding: 12px 14px; overflow-y: auto; flex-shrink: 0;
+  }
+  footer {
+    border-top: 1px solid var(--line); padding: 8px 14px; background: var(--panel);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  button, select, label.file {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 11px; font: inherit; cursor: pointer;
+  }
+  button:hover, label.file:hover { border-color: var(--dim); }
+  button:disabled { opacity: .4; cursor: default; }
+  input[type=range] { flex: 1; min-width: 140px; accent-color: var(--eager); }
+  input[type=file] { display: none; }
+  .stat { display: flex; justify-content: space-between; padding: 3px 0; }
+  .stat b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .k { color: var(--dim); }
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--dim); margin: 16px 0 6px; font-weight: 600;
+  }
+  h2:first-child { margin-top: 0; }
+  .legend { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+  .sw { width: 20px; height: 0; border-top-width: 2px; border-top-style: solid; flex-shrink: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  #event {
+    font-size: 11px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-all;
+    color: var(--dim); max-height: 190px; overflow-y: auto;
+  }
+  #drop-hint {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; flex-direction: column; gap: 10px;
+    color: var(--dim); text-align: center; padding: 24px; pointer-events: none;
+  }
+  #drop-hint code {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 11px; color: var(--fg); display: inline-block;
+  }
+  body.loaded #drop-hint { display: none; }
+  .note { color: var(--dim); font-size: 11px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>white-lotus <small>overlay visualizer</small></h1>
+  <label class="file">load trace&hellip;<input type="file" id="file" accept=".jsonl,.json,.txt"></label>
+  <span class="note" id="fname"></span>
+</header>
+
+<div id="stage">
+  <div id="canvas-wrap">
+    <svg id="svg"></svg>
+    <div id="drop-hint">
+      <div>drop a trace here, or use <b>load trace</b></div>
+      <code>cargo test --test visualize -- --ignored --nocapture</code>
+      <div class="note">writes target/viz/*.jsonl</div>
+    </div>
+  </div>
+
+  <aside>
+    <h2>run</h2>
+    <div class="stat"><span class="k">event</span><b id="s-step">0 / 0</b></div>
+    <div class="stat"><span class="k">round</span><b id="s-round">0</b></div>
+    <div class="stat"><span class="k">nodes</span><b id="s-nodes">0</b></div>
+    <div class="stat"><span class="k">active cap</span><b id="s-cap">0</b></div>
+
+    <h2>tally</h2>
+    <div class="stat"><span class="k">delivered</span><b id="s-deliv">0</b></div>
+    <div class="stat"><span class="k">sends</span><b id="s-sends">0</b></div>
+    <div class="stat"><span class="k">redundancy</span><b id="s-redun">0.00&times;</b></div>
+    <div class="stat"><span class="k">prunes</span><b id="s-prune">0</b></div>
+    <div class="stat"><span class="k">grafts</span><b id="s-graft">0</b></div>
+    <div class="stat"><span class="k">dropped</span><b id="s-drop">0</b></div>
+
+    <h2>edges</h2>
+    <div class="legend"><div class="sw" style="border-color:var(--eager)"></div> eager (active)</div>
+    <div class="legend"><div class="sw" style="border-color:var(--lazy);border-top-style:dashed"></div> lazy (pruned)</div>
+    <div class="note" style="margin-top:6px">
+      Eager/lazy is <b>derived</b> from observed PRUNE/GRAFT/GOSSIP traffic, mirroring
+      gossip.rs:143/193/211. The active view itself is ground truth, read via the
+      ttl&nbsp;=&nbsp;0 Shuffle probe.
+    </div>
+
+    <h2>nodes</h2>
+    <div class="legend"><div class="dot" style="background:var(--deliver)"></div> delivered</div>
+    <div class="legend"><div class="dot" style="background:var(--drop)"></div> payload dropped</div>
+    <div class="legend"><div class="dot" style="background:var(--unobs);border:1px solid var(--line)"></div> not yet delivered</div>
+    <div class="note" style="margin-top:6px">
+      The outer grey ring is the <b>passive view</b>, which is
+      <b>unobservable</b> from the test suite: add_to_passive emits no actions
+      and has no accessor. It is drawn empty rather than guessed at.
+    </div>
+
+    <h2>current event</h2>
+    <div id="event">&mdash;</div>
+  </aside>
+</div>
+
+<footer>
+  <button id="rew" disabled>&#x23ee;</button>
+  <button id="back" disabled>&#x25c0;</button>
+  <button id="play" disabled>&#x25b6; play</button>
+  <button id="fwd" disabled>&#x25b6;&#x25b6;</button>
+  <input type="range" id="scrub" min="0" max="0" value="0" disabled>
+  <select id="speed">
+    <option value="200">0.5&times;</option>
+    <option value="100" selected>1&times;</option>
+    <option value="40">2.5&times;</option>
+    <option value="12">8&times;</option>
+  </select>
+  <select id="filter">
+    <option value="all">all traffic</option>
+    <option value="membership">membership only</option>
+    <option value="plumtree">plumtree only</option>
+  </select>
+</footer>
+
+<script>
+const SVGNS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+
+const MEMBERSHIP = new Set(["Join","ForwardJoin","Disconnect","Neighbor","NeighborReply","Shuffle","ShuffleReplay"]);
+const PLUMTREE   = new Set(["Broadcast","IHave","Graft","Prune"]);
+
+let events = [], cursor = 0, timer = null, layout = new Map(), meta = {};
+
+// ---- loading -------------------------------------------------------------
+
+function parse(text) {
+  return text.split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+}
+
+function load(text, name) {
+  events = parse(text);
+  meta = events.find(e => e.kind === "config") || {};
+  cursor = 0;
+  document.body.classList.add("loaded");
+  $("fname").textContent = name + " — " + events.length + " events";
+  for (const el of ["rew","back","play","fwd","scrub"]) $(el).disabled = false;
+  $("scrub").max = events.length - 1;
+  buildLayout();
+  render();
+}
+
+$("file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (f) f.text().then(t => load(t, f.name));
+});
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) f.text().then(t => load(t, f.name));
+});
+
+// ---- layout: circular, stable by node id ---------------------------------
+// Deterministic on purpose, so two runs of the same scenario are comparable.
+// Ring and star topologies read cleanly this way; a force layout would jitter.
+
+function buildLayout() {
+  const n = meta.nodes || 0;
+  layout = new Map();
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    layout.set(i, { a, x: Math.cos(a), y: Math.sin(a) });
+  }
+}
+
+// ---- state reconstruction up to `cursor` ---------------------------------
+
+function stateAt(idx) {
+  const active = new Map();   // node -> Set(peer)   ground truth, from probes
+  const lazy = new Map();     // node -> Set(peer)   derived
+  const delivered = new Map();// node -> count
+  const dropped = new Set();
+  let sends = 0, prunes = 0, grafts = 0, drops = 0, round = 0;
+
+  for (let i = 0; i <= idx && i < events.length; i++) {
+    const e = events[i];
+    round = e.round ?? round;
+    switch (e.kind) {
+      case "probe":
+        active.set(e.node, new Set(e.active));
+        lazy.set(e.node, new Set(e.lazy || []));
+        break;
+      case "connect":
+        if (!active.has(e.node)) active.set(e.node, new Set());
+        active.get(e.node).add(e.peer);
+        break;
+      case "disconnect":
+        active.get(e.node)?.delete(e.peer);
+        break;
+      case "prune":
+        if (!lazy.has(e.node)) lazy.set(e.node, new Set());
+        lazy.get(e.node).add(e.peer);
+        prunes++;
+        break;
+      case "graft":
+        lazy.get(e.node)?.delete(e.peer);
+        grafts++;
+        break;
+      case "send": sends++; break;
+      case "deliver":
+        delivered.set(e.node, (delivered.get(e.node) || 0) + 1);
+        dropped.delete(e.node);
+        break;
+      case "drop": drops++; dropped.add(e.to); break;
+    }
+  }
+  return { active, lazy, delivered, dropped, sends, prunes, grafts, drops, round };
+}
+
+function msgVariant(e) {
+  return e && e.msg ? Object.keys(e.msg)[0] : null;
+}
+
+function passesFilter(e) {
+  const f = $("filter").value;
+  if (f === "all") return true;
+  const v = msgVariant(e);
+  if (!v) return true;
+  return f === "membership" ? MEMBERSHIP.has(v) : PLUMTREE.has(v);
+}
+
+// ---- render --------------------------------------------------------------
+
+function render() {
+  const svg = $("svg");
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  if (!events.length) return;
+
+  const wrap = $("canvas-wrap").getBoundingClientRect();
+  const W = wrap.width, H = wrap.height;
+  const R = Math.max(60, Math.min(W, H) / 2 - 54);
+  const cx = W / 2, cy = H / 2;
+  const pos = i => {
+    const p = layout.get(i);
+    return p ? { x: cx + p.x * R, y: cy + p.y * R } : { x: cx, y: cy };
+  };
+
+  const st = stateAt(cursor);
+  const ev = events[cursor];
+
+  const g = (parent, name, attrs) => {
+    const el = document.createElementNS(SVGNS, name);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    parent.appendChild(el);
+    return el;
+  };
+
+  // edges: draw each unordered pair once, coloured by lazy-ness
+  const edges = new Map();
+  for (const [node, peers] of st.active) {
+    for (const peer of peers) {
+      if (!layout.has(peer) || !layout.has(node)) continue;
+      const key = node < peer ? node + ":" + peer : peer + ":" + node;
+      const isLazy = st.lazy.get(node)?.has(peer) || st.lazy.get(peer)?.has(node);
+      // one side seeing the peer but not the other = asymmetric link
+      const back = st.active.get(peer)?.has(node);
+      const prev = edges.get(key);
+      edges.set(key, {
+        a: Math.min(node, peer), b: Math.max(node, peer),
+        lazy: isLazy || (prev && prev.lazy),
+        asym: back === false,
+      });
+    }
+  }
+
+  const eg = g(svg, "g", {});
+  for (const e of edges.values()) {
+    const p = pos(e.a), q = pos(e.b);
+    g(eg, "line", {
+      x1: p.x, y1: p.y, x2: q.x, y2: q.y,
+      stroke: e.lazy ? "var(--lazy)" : "var(--eager)",
+      "stroke-width": e.lazy ? 1 : 1.7,
+      "stroke-dasharray": e.lazy ? "3 3" : (e.asym ? "6 3" : ""),
+      opacity: e.lazy ? .5 : .85,
+    });
+  }
+
+  // the message in flight for the current event
+  if (ev && (ev.kind === "send" || ev.kind === "drop") && layout.has(ev.from) && layout.has(ev.to)) {
+    const p = pos(ev.from), q = pos(ev.to);
+    const v = msgVariant(ev);
+    const col = ev.kind === "drop" ? "var(--drop)"
+      : v === "Prune" ? "var(--prune)"
+      : v === "Graft" ? "var(--graft)"
+      : MEMBERSHIP.has(v) ? "var(--graft)" : "var(--eager)";
+    g(svg, "line", {
+      x1: p.x, y1: p.y, x2: q.x, y2: q.y,
+      stroke: col, "stroke-width": 2.6,
+      "stroke-dasharray": ev.kind === "drop" ? "4 4" : "",
+    });
+    g(svg, "circle", { cx: q.x, cy: q.y, r: 5, fill: col });
+    const mid = g(svg, "text", {
+      x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 7,
+      fill: col, "font-size": 10, "text-anchor": "middle",
+      "font-family": "ui-monospace, monospace",
+    });
+    mid.textContent = v || ev.kind;
+  }
+
+  // nodes
+  for (let i = 0; i < (meta.nodes || 0); i++) {
+    const p = pos(i);
+    const dcount = st.delivered.get(i) || 0;
+    const active = st.active.get(i);
+    const cap = meta.active_capacity || 1;
+
+    // outer ring = passive view, deliberately empty (unobservable)
+    g(svg, "circle", {
+      cx: p.x, cy: p.y, r: 16,
+      fill: "none", stroke: "var(--unobs)", "stroke-width": 3,
+    });
+    // capacity arc = how full the active view is
+    if (active && active.size) {
+      const frac = Math.min(1, active.size / cap);
+      const c = 2 * Math.PI * 12;
+      g(svg, "circle", {
+        cx: p.x, cy: p.y, r: 12,
+        fill: "none",
+        stroke: active.size > cap ? "var(--drop)" : "var(--dim)",
+        "stroke-width": 2,
+        "stroke-dasharray": (c * frac) + " " + c,
+        transform: "rotate(-90 " + p.x + " " + p.y + ")",
+      });
+    }
+    const isCur = ev && (ev.node === i || ev.to === i || ev.from === i);
+    g(svg, "circle", {
+      cx: p.x, cy: p.y, r: 9,
+      fill: st.dropped.has(i) ? "var(--drop)" : dcount ? "var(--deliver)" : "var(--panel)",
+      stroke: isCur ? "var(--fg)" : "var(--line)",
+      "stroke-width": isCur ? 2 : 1,
+    });
+    const t = g(svg, "text", {
+      x: p.x, y: p.y + 3.5, fill: dcount ? "#fff" : "var(--dim)",
+      "font-size": 9, "text-anchor": "middle",
+      "font-family": "ui-monospace, monospace",
+    });
+    t.textContent = i;
+    if (dcount > 1) {
+      const b = g(svg, "text", {
+        x: p.x + 13, y: p.y - 10, fill: "var(--deliver)",
+        "font-size": 9, "text-anchor": "middle",
+        "font-family": "ui-monospace, monospace",
+      });
+      b.textContent = "×" + dcount;
+    }
+  }
+
+  // stats
+  const totalDeliv = [...st.delivered.values()].reduce((a, b) => a + b, 0);
+  $("s-step").textContent = cursor + " / " + (events.length - 1);
+  $("s-round").textContent = st.round;
+  $("s-nodes").textContent = meta.nodes || 0;
+  $("s-cap").textContent = meta.active_capacity || 0;
+  $("s-deliv").textContent = totalDeliv;
+  $("s-sends").textContent = st.sends;
+  $("s-redun").textContent = (totalDeliv ? (st.sends / totalDeliv) : 0).toFixed(2) + "×";
+  $("s-prune").textContent = st.prunes;
+  $("s-graft").textContent = st.grafts;
+  $("s-drop").textContent = st.drops;
+  $("scrub").value = cursor;
+  $("event").textContent = ev ? JSON.stringify(ev, null, 1) : "—";
+}
+
+// ---- playback ------------------------------------------------------------
+
+function seek(i) {
+  cursor = Math.max(0, Math.min(events.length - 1, i));
+  render();
+}
+
+function advance(dir) {
+  let i = cursor + dir;
+  while (i > 0 && i < events.length - 1 && !passesFilter(events[i])) i += dir;
+  seek(i);
+}
+
+function stop() {
+  clearInterval(timer); timer = null;
+  $("play").innerHTML = "▶ play";
+}
+
+$("play").onclick = () => {
+  if (timer) return stop();
+  $("play").innerHTML = "⏸ pause";
+  timer = setInterval(() => {
+    if (cursor >= events.length - 1) return stop();
+    advance(1);
+  }, +$("speed").value);
+};
+$("fwd").onclick = () => { stop(); advance(1); };
+$("back").onclick = () => { stop(); advance(-1); };
+$("rew").onclick = () => { stop(); seek(0); };
+$("scrub").oninput = e => { stop(); seek(+e.target.value); };
+$("speed").onchange = () => { if (timer) { stop(); $("play").click(); } };
+$("filter").onchange = render;
+
+addEventListener("keydown", e => {
+  if (!events.length) return;
+  if (e.key === "ArrowRight") { stop(); advance(1); }
+  else if (e.key === "ArrowLeft") { stop(); advance(-1); }
+  else if (e.key === " ") { e.preventDefault(); $("play").click(); }
+});
+addEventListener("resize", render);
+</script>
+</body>
+</html>
